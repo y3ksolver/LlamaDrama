@@ -7,13 +7,13 @@ plugins {
 }
 
 android {
-    namespace = "com.example.llamadrama"
+    namespace = "com.dramallama.app"
     compileSdk {
         version = release(36)
     }
 
     defaultConfig {
-        applicationId = "com.example.llamadrama"
+        applicationId = "com.dramallama.app"
         minSdk = 36
         targetSdk = 36
         versionCode = 1
@@ -45,6 +45,7 @@ android {
 
 dependencies {
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
@@ -66,6 +67,9 @@ dependencies {
     
     // JSON Serialization for export/import
     implementation(libs.kotlinx.serialization.json)
+    
+    // WorkManager for background notifications
+    implementation(libs.androidx.work.runtime.ktx)
     
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
