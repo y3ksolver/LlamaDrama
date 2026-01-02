@@ -6,10 +6,13 @@ import androidx.lifecycle.viewModelScope
 import com.dramallama.app.data.database.MeetingNote
 import com.dramallama.app.data.database.TeamMember
 import com.dramallama.app.data.repository.TeamRepository
+import com.dramallama.app.data.repository.toLocalDateTime
+import com.dramallama.app.ui.components.TrendDataPoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -27,8 +30,45 @@ class MemberDetailViewModel(
     val notes: StateFlow<List<MeetingNote>> = repository.getNotesForMemberFlow(memberId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     
-    private val _showAddNoteSheet = MutableStateFlow(false)
-    val showAddNoteSheet: StateFlow<Boolean> = _showAddNoteSheet.asStateFlow()
+    // Mood trend data: every note with mood -> data point
+    val moodTrend: StateFlow<List<TrendDataPoint>> = repository.getNotesForMemberFlow(memberId)
+        .map { notesList ->
+            notesList.filter { it.mood != null }
+                .map { note ->
+                    TrendDataPoint(
+                        date = note.timestampEpochSecond.toLocalDateTime().toLocalDate(),
+                        value = note.mood!!
+                    )
+                }
+                .sortedBy { it.date }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    
+    // Productivity trend data: every note with productivity -> data point
+    val productivityTrend: StateFlow<List<TrendDataPoint>> = repository.getNotesForMemberFlow(memberId)
+        .map { notesList ->
+            notesList.filter { it.productivity != null }
+                .map { note ->
+                    TrendDataPoint(
+                        date = note.timestampEpochSecond.toLocalDateTime().toLocalDate(),
+                        value = note.productivity!!
+                    )
+                }
+                .sortedBy { it.date }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    
+    // Total meeting count
+    val totalMeetings: StateFlow<Int> = repository.getNotesForMemberFlow(memberId)
+        .map { it.size }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    
+    private val _showNoteSheet = MutableStateFlow(false)
+    val showNoteSheet: StateFlow<Boolean> = _showNoteSheet.asStateFlow()
+    
+    // Track if we're editing an existing note (null = adding new)
+    private val _editingNote = MutableStateFlow<MeetingNote?>(null)
+    val editingNote: StateFlow<MeetingNote?> = _editingNote.asStateFlow()
     
     private val _noteContent = MutableStateFlow("")
     val noteContent: StateFlow<String> = _noteContent.asStateFlow()
@@ -50,18 +90,33 @@ class MemberDetailViewModel(
     val noteFlightRisk: StateFlow<Int?> = _noteFlightRisk.asStateFlow()
     
     fun showAddNoteSheet() {
-        // Reset to current date/time when opening
+        // Reset to current date/time for new note
+        _editingNote.value = null
+        _noteContent.value = ""
         _noteDate.value = LocalDate.now()
         _noteTime.value = LocalTime.now()
-        // Reset sentiment values
         _noteMood.value = null
         _noteProductivity.value = null
         _noteFlightRisk.value = null
-        _showAddNoteSheet.value = true
+        _showNoteSheet.value = true
     }
     
-    fun hideAddNoteSheet() {
-        _showAddNoteSheet.value = false
+    fun showEditNoteSheet(note: MeetingNote) {
+        // Populate form with existing note data
+        _editingNote.value = note
+        _noteContent.value = note.content
+        val noteDateTime = note.timestampEpochSecond.toLocalDateTime()
+        _noteDate.value = noteDateTime.toLocalDate()
+        _noteTime.value = noteDateTime.toLocalTime()
+        _noteMood.value = note.mood
+        _noteProductivity.value = note.productivity
+        _noteFlightRisk.value = note.flightRisk
+        _showNoteSheet.value = true
+    }
+    
+    fun hideNoteSheet() {
+        _showNoteSheet.value = false
+        _editingNote.value = null
         _noteContent.value = ""
         _noteMood.value = null
         _noteProductivity.value = null
@@ -92,20 +147,34 @@ class MemberDetailViewModel(
         _noteFlightRisk.value = flightRisk
     }
     
-    fun addMeetingNote() {
+    fun saveNote() {
         val content = _noteContent.value.trim()
         if (content.isNotEmpty()) {
             val timestamp = LocalDateTime.of(_noteDate.value, _noteTime.value)
             viewModelScope.launch {
-                repository.addMeetingNote(
-                    memberId = memberId,
-                    content = content,
-                    timestamp = timestamp,
-                    mood = _noteMood.value,
-                    productivity = _noteProductivity.value,
-                    flightRisk = _noteFlightRisk.value
-                )
-                hideAddNoteSheet()
+                val existingNote = _editingNote.value
+                if (existingNote != null) {
+                    // Update existing note
+                    val updatedNote = existingNote.copy(
+                        content = content,
+                        timestampEpochSecond = timestamp.atZone(java.time.ZoneId.systemDefault()).toEpochSecond(),
+                        mood = _noteMood.value,
+                        productivity = _noteProductivity.value,
+                        flightRisk = _noteFlightRisk.value
+                    )
+                    repository.updateNote(updatedNote)
+                } else {
+                    // Add new note
+                    repository.addMeetingNote(
+                        memberId = memberId,
+                        content = content,
+                        timestamp = timestamp,
+                        mood = _noteMood.value,
+                        productivity = _noteProductivity.value,
+                        flightRisk = _noteFlightRisk.value
+                    )
+                }
+                hideNoteSheet()
             }
         }
     }

@@ -18,10 +18,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DatePicker
@@ -62,19 +66,21 @@ import com.dramallama.app.data.database.TeamMember
 import com.dramallama.app.data.repository.toLocalDate
 import com.dramallama.app.data.repository.toLocalDateTime
 import com.dramallama.app.ui.components.FlightRiskCheckbox
-import com.dramallama.app.ui.components.SentimentBadgesRow
 import com.dramallama.app.ui.components.SentimentSlider
+import com.dramallama.app.ui.components.TrendChart
+import com.dramallama.app.ui.components.TrendDataPoint
 import com.dramallama.app.ui.viewmodel.MemberDetailViewModel
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
 // Pre-defined formatters to avoid creating on each recomposition
-private val propertyDateFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy")
-private val noteDateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+private val headerDateFormatter = DateTimeFormatter.ofPattern("MMM d")
+private val noteDateFormatter = DateTimeFormatter.ofPattern("MMM d, HH:mm")
 private val pickerDateFormatter = DateTimeFormatter.ofPattern("MMM dd, yyyy")
 private val pickerTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
@@ -86,7 +92,8 @@ fun MemberDetailScreen(
 ) {
     val member by viewModel.member.collectAsState()
     val notes by viewModel.notes.collectAsState()
-    val showAddNoteSheet by viewModel.showAddNoteSheet.collectAsState()
+    val showNoteSheet by viewModel.showNoteSheet.collectAsState()
+    val editingNote by viewModel.editingNote.collectAsState()
     val noteContent by viewModel.noteContent.collectAsState()
     val noteDate by viewModel.noteDate.collectAsState()
     val noteTime by viewModel.noteTime.collectAsState()
@@ -94,6 +101,11 @@ fun MemberDetailScreen(
     val noteProductivity by viewModel.noteProductivity.collectAsState()
     val noteFlightRisk by viewModel.noteFlightRisk.collectAsState()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    
+    // Sentiment trend data
+    val moodTrend by viewModel.moodTrend.collectAsState()
+    val productivityTrend by viewModel.productivityTrend.collectAsState()
+    val totalMeetings by viewModel.totalMeetings.collectAsState()
     
     Scaffold(
         topBar = {
@@ -124,30 +136,27 @@ fun MemberDetailScreen(
                     .fillMaxSize()
                     .padding(padding)
                     .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 item {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    MemberHeader(member = currentMember)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    CompactMemberHeader(member = currentMember)
                 }
                 
+                // Sentiment Trends Section (collapsible)
                 item {
-                    PropertiesCard(member = currentMember)
+                    SentimentTrendsCard(
+                        moodTrend = moodTrend,
+                        productivityTrend = productivityTrend,
+                        totalMeetings = totalMeetings
+                    )
                 }
                 
                 if (notes.isNotEmpty()) {
-                    item {
-                        Text(
-                            "Meeting Notes",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(top = 8.dp)
-                        )
-                    }
-                    
                     items(notes, key = { it.id }) { note ->
                         SwipeToDeleteNoteCard(
                             note = note,
+                            onEdit = { viewModel.showEditNoteSheet(note) },
                             onDelete = { viewModel.deleteNote(note) }
                         )
                     }
@@ -171,12 +180,13 @@ fun MemberDetailScreen(
         }
     }
     
-    if (showAddNoteSheet) {
+    if (showNoteSheet) {
         ModalBottomSheet(
-            onDismissRequest = { viewModel.hideAddNoteSheet() },
+            onDismissRequest = { viewModel.hideNoteSheet() },
             sheetState = sheetState
         ) {
-            AddNoteSheet(
+            NoteSheet(
+                isEditing = editingNote != null,
                 noteContent = noteContent,
                 onNoteContentChange = { viewModel.updateNoteContent(it) },
                 noteDate = noteDate,
@@ -189,48 +199,15 @@ fun MemberDetailScreen(
                 onProductivityChange = { viewModel.updateNoteProductivity(it) },
                 flightRisk = noteFlightRisk,
                 onFlightRiskChange = { viewModel.updateNoteFlightRisk(it) },
-                onSave = { viewModel.addMeetingNote() },
-                onCancel = { viewModel.hideAddNoteSheet() }
+                onSave = { viewModel.saveNote() },
+                onCancel = { viewModel.hideNoteSheet() }
             )
         }
     }
 }
 
 @Composable
-fun MemberHeader(member: TeamMember) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Box(
-            modifier = Modifier
-                .size(72.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = member.name.take(2).uppercase(),
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-        }
-        
-        Spacer(modifier = Modifier.width(16.dp))
-        
-        Column {
-            Text(
-                text = member.name,
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold
-            )
-        }
-    }
-}
-
-@Composable
-fun PropertiesCard(member: TeamMember) {
+fun CompactMemberHeader(member: TeamMember) {
     val today = remember { LocalDate.now() }
     val lastContact = remember(member.lastContactEpochDay) { 
         member.lastContactEpochDay?.toLocalDate() 
@@ -239,60 +216,66 @@ fun PropertiesCard(member: TeamMember) {
         lastContact?.let { ChronoUnit.DAYS.between(it, today).toInt() } 
     }
     
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        ),
-        shape = RoundedCornerShape(16.dp)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+        // Compact avatar
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
         ) {
             Text(
-                "Properties",
-                style = MaterialTheme.typography.titleSmall,
+                text = member.name.take(2).uppercase(),
+                style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            
-            PropertyRow(
-                icon = "📅",
-                label = "lastContact",
-                value = lastContact?.format(propertyDateFormatter) ?: "Not set"
-            )
-            
-            PropertyRow(
-                icon = "⏱️",
-                label = "Days Since",
-                value = daysSince?.toString() ?: "—"
+                color = MaterialTheme.colorScheme.primary
             )
         }
-    }
-}
-
-@Composable
-fun PropertyRow(icon: String, label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(icon)
+        
+        Spacer(modifier = Modifier.width(12.dp))
+        
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = member.name,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            // Inline stats
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (lastContact != null) {
+                Text(
+                        text = lastContact.format(headerDateFormatter),
+                        style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                    Text(
+                        text = "·",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                    )
+                    Text(
+                        text = "${daysSince}d ago",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (daysSince != null && daysSince >= 14) 
+                            MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
         Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(100.dp)
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (value == "Empty" || value == "Not set") 
-                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-            else MaterialTheme.colorScheme.onSurface
-        )
+                        text = "No meetings yet",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -300,6 +283,7 @@ fun PropertyRow(icon: String, label: String, value: String) {
 @Composable
 fun SwipeToDeleteNoteCard(
     note: MeetingNote,
+    onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
     var showDeleteConfirmation by remember { mutableStateOf(false) }
@@ -315,24 +299,17 @@ fun SwipeToDeleteNoteCard(
     SwipeToDismissBox(
         state = dismissState,
         backgroundContent = {
+            // Simple red background without trash icon
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.error)
-                    .padding(horizontal = 20.dp),
-                contentAlignment = Alignment.CenterEnd
-            ) {
-                Icon(
-                    Icons.Default.Delete,
-                    contentDescription = "Delete",
-                    tint = MaterialTheme.colorScheme.onError
-                )
-            }
+            )
         },
         enableDismissFromStartToEnd = false
     ) {
-        MeetingNoteCard(note = note)
+        MeetingNoteCard(note = note, onClick = onEdit)
     }
     
     if (showDeleteConfirmation) {
@@ -360,92 +337,171 @@ fun SwipeToDeleteNoteCard(
 }
 
 @Composable
-fun MeetingNoteCard(note: MeetingNote) {
+fun MeetingNoteCard(
+    note: MeetingNote,
+    onClick: () -> Unit = {}
+) {
     val timestamp = remember(note.timestampEpochSecond) { 
         note.timestampEpochSecond.toLocalDateTime() 
     }
     
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
+            // Fully opaque so swipe looks clean
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
         ),
         shape = RoundedCornerShape(12.dp)
     ) {
         Column(
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier.padding(12.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = timestamp.format(noteDateFormatter),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                
-                // Sentiment badges
-                SentimentBadgesRow(
-                    mood = note.mood,
-                    productivity = note.productivity,
-                    flightRisk = note.flightRisk
-                )
-            }
+            // Date header
+            Text(
+                text = timestamp.format(noteDateFormatter),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             
             Spacer(modifier = Modifier.height(8.dp))
             
-            // Parse content as bullet points
-            val lines = note.content.lines()
-            lines.forEachIndexed { index, line ->
-                if (line.isNotBlank()) {
-                    Row(
-                        modifier = Modifier.padding(vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = "${index + 1}. ",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = line.trimStart('-', '*', ' '),
-                            style = MaterialTheme.typography.bodyMedium
-                        )
+            // Flowing text content (cleaned up)
+            val cleanedContent = remember(note.content) {
+                note.content.lines()
+                    .filter { it.isNotBlank() }
+                    .joinToString("\n") { line ->
+                        val cleaned = line.trimStart('-', '*', '•', ' ', '\t')
+                        "• $cleaned"
                     }
-                }
+            }
+            
+                        Text(
+                text = cleanedContent,
+                            style = MaterialTheme.typography.bodyMedium,
+                lineHeight = MaterialTheme.typography.bodyMedium.lineHeight * 1.3
+            )
+            
+            // Sentiment indicators below content (bigger with labels)
+            SentimentIndicatorsRow(
+                mood = note.mood,
+                productivity = note.productivity,
+                flightRisk = note.flightRisk
+            )
+        }
+    }
+}
+
+@Composable
+fun SentimentIndicatorsRow(
+    mood: Int?,
+    productivity: Int?,
+    flightRisk: Int?,
+    modifier: Modifier = Modifier
+) {
+    val isAtRisk = flightRisk != null && flightRisk > 0
+    val hasSentiment = mood != null || productivity != null || isAtRisk
+    
+    if (hasSentiment) {
+        Spacer(modifier = Modifier.height(10.dp))
+        Row(
+            modifier = modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            mood?.let {
+                SentimentChip(
+                    emoji = when (it) { 1 -> "😞"; 2 -> "😐"; else -> "😊" },
+                    label = when (it) { 1 -> "Low"; 2 -> "Okay"; else -> "Good" },
+                    category = "Mood"
+                )
+            }
+            productivity?.let {
+                SentimentChip(
+                    emoji = when (it) { 1 -> "📉"; 2 -> "📊"; else -> "📈" },
+                    label = when (it) { 1 -> "Low"; 2 -> "Okay"; else -> "Good" },
+                    category = "Productivity"
+                )
+            }
+            if (isAtRisk) {
+                SentimentChip(
+                    emoji = "⚠️",
+                    label = "At Risk",
+                    category = "Flight",
+                    isWarning = true
+                )
             }
         }
     }
 }
 
 @Composable
-fun EmptyNotesPlaceholder() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-        ),
-        shape = RoundedCornerShape(12.dp)
+fun SentimentChip(
+    emoji: String,
+    label: String,
+    category: String,
+    isWarning: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    val bgColor = if (isWarning) 
+        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+    else 
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+    
+    val textColor = if (isWarning)
+        MaterialTheme.colorScheme.error
+    else
+        MaterialTheme.colorScheme.onSurface
+    
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(bgColor)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text("📝", style = MaterialTheme.typography.displaySmall)
-            Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+            text = emoji,
+            style = MaterialTheme.typography.titleMedium
+        )
+        Column {
             Text(
-                "No meeting notes yet",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                text = category,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             )
             Text(
-                "Tap + to add your first 1-on-1 note",
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Medium,
+                color = textColor
+            )
+        }
+    }
+}
+
+@Composable
+fun EmptyNotesPlaceholder() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                "📝",
+                style = MaterialTheme.typography.headlineMedium
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "No notes yet · Tap + to add",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
             )
         }
     }
@@ -453,7 +509,8 @@ fun EmptyNotesPlaceholder() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddNoteSheet(
+fun NoteSheet(
+    isEditing: Boolean,
     noteContent: String,
     onNoteContentChange: (String) -> Unit,
     noteDate: LocalDate,
@@ -479,82 +536,82 @@ fun AddNoteSheet(
             .imePadding()
     ) {
         item {
-            Text(
-                "Add Meeting Note",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
-            )
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            // Date and Time selectors
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+        Text(
+            if (isEditing) "Edit Meeting Note" else "Add Meeting Note",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold
+        )
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        // Date and Time selectors
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Date picker button
+            Card(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { showDatePicker = true },
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                ),
+                shape = RoundedCornerShape(12.dp)
             ) {
-                // Date picker button
-                Card(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { showDatePicker = true },
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    ),
-                    shape = RoundedCornerShape(12.dp)
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("📅", style = MaterialTheme.typography.titleMedium)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text(
-                                "Date",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                noteDate.format(pickerDateFormatter),
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-                }
-                
-                // Time picker button
-                Card(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { showTimePicker = true },
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    ),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("🕐", style = MaterialTheme.typography.titleMedium)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text(
-                                "Time",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                noteTime.format(pickerTimeFormatter),
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
+                    Text("📅", style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            "Date",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            noteDate.format(pickerDateFormatter),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
                     }
                 }
             }
             
+            // Time picker button
+            Card(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { showTimePicker = true },
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                ),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("🕐", style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            "Time",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            noteTime.format(pickerTimeFormatter),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+        }
+        
             Spacer(modifier = Modifier.height(20.dp))
             
             // Sentiment Tracking Section
@@ -596,52 +653,53 @@ fun AddNoteSheet(
             )
             
             Spacer(modifier = Modifier.height(20.dp))
-            
-            Text(
-                "Enter your 1-on-1 notes (one point per line)",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            
-            Spacer(modifier = Modifier.height(8.dp))
-            
-            OutlinedTextField(
-                value = noteContent,
-                onValueChange = onNoteContentChange,
-                modifier = Modifier
-                    .fillMaxWidth()
+        
+        Text(
+            "Enter your 1-on-1 notes (one point per line)",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        OutlinedTextField(
+            value = noteContent,
+            onValueChange = onNoteContentChange,
+            modifier = Modifier
+                .fillMaxWidth()
                     .height(150.dp),
-                placeholder = { 
-                    Text("- Discussion point 1\n- Discussion point 2\n- Action items...")
-                }
-            )
-            
-            Spacer(modifier = Modifier.height(24.dp))
-            
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
-            ) {
-                TextButton(onClick = onCancel) {
-                    Text("Cancel")
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                TextButton(
-                    onClick = onSave,
-                    enabled = noteContent.isNotBlank()
-                ) {
-                    Text("Save")
-                }
+            placeholder = { 
+                Text("- Discussion point 1\n- Discussion point 2\n- Action items...")
             }
-            
-            Spacer(modifier = Modifier.height(24.dp))
+        )
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+        ) {
+            TextButton(onClick = onCancel) {
+                Text("Cancel")
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            TextButton(
+                onClick = onSave,
+                enabled = noteContent.isNotBlank()
+            ) {
+                Text(if (isEditing) "Update" else "Save")
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(24.dp))
         }
     }
     
     // Date Picker Dialog
+    // Note: Material3 DatePicker works with UTC millis internally
     if (showDatePicker) {
         val datePickerState = rememberDatePickerState(
-            initialSelectedDateMillis = noteDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            initialSelectedDateMillis = noteDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
         )
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
@@ -650,7 +708,7 @@ fun AddNoteSheet(
                     onClick = {
                         datePickerState.selectedDateMillis?.let { millis ->
                             val selectedDate = Instant.ofEpochMilli(millis)
-                                .atZone(ZoneId.systemDefault())
+                                .atZone(ZoneOffset.UTC)
                                 .toLocalDate()
                             onDateChange(selectedDate)
                         }
@@ -707,6 +765,107 @@ fun AddNoteSheet(
                 }
             }
         )
+    }
+}
+
+@Composable
+fun SentimentTrendsCard(
+    moodTrend: List<TrendDataPoint>,
+    productivityTrend: List<TrendDataPoint>,
+    totalMeetings: Int,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val hasTrendData = moodTrend.isNotEmpty() || productivityTrend.isNotEmpty()
+    
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable { expanded = !expanded },
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp)
+        ) {
+            // Compact header row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("📊", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        "Trends",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (hasTrendData) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            "·",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            "${moodTrend.size + productivityTrend.size} data points",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
+                    }
+                }
+                
+                Icon(
+                    imageVector = if (expanded) Icons.Default.KeyboardArrowUp 
+                        else Icons.Default.KeyboardArrowDown,
+                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
+            }
+            
+            // Expandable content
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically(),
+                exit = shrinkVertically()
+            ) {
+                if (hasTrendData) {
+                    Column(
+                        modifier = Modifier.padding(top = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Mood trend chart
+                        TrendChart(
+                            title = "Mood",
+                            emoji = "😊",
+                            dataPoints = moodTrend
+                        )
+                        
+                        // Productivity trend chart
+                        TrendChart(
+                            title = "Productivity",
+                            emoji = "📈",
+                            dataPoints = productivityTrend
+                        )
+                    }
+                } else {
+                    // Compact no-data message
+                    Text(
+                        text = "Add mood/productivity to notes to see trends",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+            }
+        }
     }
 }
 

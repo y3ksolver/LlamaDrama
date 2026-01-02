@@ -9,7 +9,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.time.LocalDate
 import java.time.LocalDateTime
-import java.time.ZoneOffset
+import java.time.ZoneId
 
 class TeamRepository(private val database: AppDatabase) {
     
@@ -54,7 +54,7 @@ class TeamRepository(private val database: AppDatabase) {
     ): Long {
         val note = MeetingNote(
             memberId = memberId,
-            timestampEpochSecond = timestamp.toEpochSecond(ZoneOffset.UTC),
+            timestampEpochSecond = timestamp.atZone(ZoneId.systemDefault()).toEpochSecond(),
             content = content,
             mood = mood,
             productivity = productivity,
@@ -70,12 +70,12 @@ class TeamRepository(private val database: AppDatabase) {
             
             // Update only if this note is newer than current last contact (or no last contact set)
             if (currentLastContact == null || noteDate > currentLastContact) {
-                teamMemberDao.update(
-                    it.copy(
+            teamMemberDao.update(
+                it.copy(
                         lastContactEpochDay = noteDate,
-                        lastTopic = content.lines().firstOrNull()?.take(100) ?: "Meeting"
-                    )
+                    lastTopic = content.lines().firstOrNull()?.take(100) ?: "Meeting"
                 )
+            )
             }
         }
         
@@ -188,6 +188,7 @@ class TeamRepository(private val database: AppDatabase) {
 // Extension functions for date conversion
 fun LocalDate.toEpochDay(): Long = this.toEpochDay()
 fun Long.toLocalDate(): LocalDate = LocalDate.ofEpochDay(this)
-fun LocalDateTime.toEpochSecond(): Long = this.toEpochSecond(ZoneOffset.UTC)
-fun Long.toLocalDateTime(): LocalDateTime = LocalDateTime.ofEpochSecond(this, 0, ZoneOffset.UTC)
+fun LocalDateTime.toEpochSecond(): Long = this.atZone(ZoneId.systemDefault()).toEpochSecond()
+fun Long.toLocalDateTime(): LocalDateTime = 
+    java.time.Instant.ofEpochSecond(this).atZone(ZoneId.systemDefault()).toLocalDateTime()
 
