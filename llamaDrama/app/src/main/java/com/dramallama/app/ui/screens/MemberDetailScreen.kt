@@ -61,6 +61,9 @@ import com.dramallama.app.data.database.MeetingNote
 import com.dramallama.app.data.database.TeamMember
 import com.dramallama.app.data.repository.toLocalDate
 import com.dramallama.app.data.repository.toLocalDateTime
+import com.dramallama.app.ui.components.FlightRiskCheckbox
+import com.dramallama.app.ui.components.SentimentBadgesRow
+import com.dramallama.app.ui.components.SentimentSlider
 import com.dramallama.app.ui.viewmodel.MemberDetailViewModel
 import java.time.Instant
 import java.time.LocalDate
@@ -87,6 +90,9 @@ fun MemberDetailScreen(
     val noteContent by viewModel.noteContent.collectAsState()
     val noteDate by viewModel.noteDate.collectAsState()
     val noteTime by viewModel.noteTime.collectAsState()
+    val noteMood by viewModel.noteMood.collectAsState()
+    val noteProductivity by viewModel.noteProductivity.collectAsState()
+    val noteFlightRisk by viewModel.noteFlightRisk.collectAsState()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     
     Scaffold(
@@ -177,6 +183,12 @@ fun MemberDetailScreen(
                 onDateChange = { viewModel.updateNoteDate(it) },
                 noteTime = noteTime,
                 onTimeChange = { viewModel.updateNoteTime(it) },
+                mood = noteMood,
+                onMoodChange = { viewModel.updateNoteMood(it) },
+                productivity = noteProductivity,
+                onProductivityChange = { viewModel.updateNoteProductivity(it) },
+                flightRisk = noteFlightRisk,
+                onFlightRiskChange = { viewModel.updateNoteFlightRisk(it) },
                 onSave = { viewModel.addMeetingNote() },
                 onCancel = { viewModel.hideAddNoteSheet() }
             )
@@ -213,13 +225,6 @@ fun MemberHeader(member: TeamMember) {
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold
             )
-            member.lastTopic?.let { topic ->
-                Text(
-                    text = topic,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
         }
     }
 }
@@ -256,12 +261,6 @@ fun PropertiesCard(member: TeamMember) {
                 icon = "📅",
                 label = "lastContact",
                 value = lastContact?.format(propertyDateFormatter) ?: "Not set"
-            )
-            
-            PropertyRow(
-                icon = "📝",
-                label = "lastTopic",
-                value = member.lastTopic ?: "Empty"
             )
             
             PropertyRow(
@@ -376,12 +375,25 @@ fun MeetingNoteCard(note: MeetingNote) {
         Column(
             modifier = Modifier.padding(16.dp)
         ) {
-            Text(
-                text = timestamp.format(noteDateFormatter),
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = timestamp.format(noteDateFormatter),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                
+                // Sentiment badges
+                SentimentBadgesRow(
+                    mood = note.mood,
+                    productivity = note.productivity,
+                    flightRisk = note.flightRisk
+                )
+            }
             
             Spacer(modifier = Modifier.height(8.dp))
             
@@ -448,134 +460,182 @@ fun AddNoteSheet(
     onDateChange: (LocalDate) -> Unit,
     noteTime: LocalTime,
     onTimeChange: (LocalTime) -> Unit,
+    mood: Int?,
+    onMoodChange: (Int?) -> Unit,
+    productivity: Int?,
+    onProductivityChange: (Int?) -> Unit,
+    flightRisk: Int?,
+    onFlightRiskChange: (Int?) -> Unit,
     onSave: () -> Unit,
     onCancel: () -> Unit
 ) {
     var showDatePicker by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
     
-    Column(
+    LazyColumn(
         modifier = Modifier
             .fillMaxWidth()
             .padding(24.dp)
             .imePadding()
     ) {
-        Text(
-            "Add Meeting Note",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold
-        )
-        
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        // Date and Time selectors
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Date picker button
-            Card(
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable { showDatePicker = true },
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                ),
-                shape = RoundedCornerShape(12.dp)
+        item {
+            Text(
+                "Add Meeting Note",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // Date and Time selectors
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                // Date picker button
+                Card(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { showDatePicker = true },
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    ),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("📅", style = MaterialTheme.typography.titleMedium)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column {
-                        Text(
-                            "Date",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            noteDate.format(pickerDateFormatter),
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium
-                        )
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("📅", style = MaterialTheme.typography.titleMedium)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                "Date",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                noteDate.format(pickerDateFormatter),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+                
+                // Time picker button
+                Card(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { showTimePicker = true },
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("🕐", style = MaterialTheme.typography.titleMedium)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                "Time",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                noteTime.format(pickerTimeFormatter),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                 }
             }
             
-            // Time picker button
-            Card(
+            Spacer(modifier = Modifier.height(20.dp))
+            
+            // Sentiment Tracking Section
+            Text(
+                "Sentiment Tracking (optional)",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            // Mood Slider (3 levels)
+            SentimentSlider(
+                label = "Mood",
+                emoji = "😊",
+                value = mood,
+                onValueChange = onMoodChange
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            // Productivity Slider (3 levels)
+            SentimentSlider(
+                label = "Productivity",
+                emoji = "📈",
+                value = productivity,
+                onValueChange = onProductivityChange
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            // Flight Risk Checkbox
+            FlightRiskCheckbox(
+                checked = flightRisk != null && flightRisk > 0,
+                onCheckedChange = { checked -> 
+                    onFlightRiskChange(if (checked) 1 else null) 
+                }
+            )
+            
+            Spacer(modifier = Modifier.height(20.dp))
+            
+            Text(
+                "Enter your 1-on-1 notes (one point per line)",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            OutlinedTextField(
+                value = noteContent,
+                onValueChange = onNoteContentChange,
                 modifier = Modifier
-                    .weight(1f)
-                    .clickable { showTimePicker = true },
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                ),
-                shape = RoundedCornerShape(12.dp)
+                    .fillMaxWidth()
+                    .height(150.dp),
+                placeholder = { 
+                    Text("- Discussion point 1\n- Discussion point 2\n- Action items...")
+                }
+            )
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
             ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                TextButton(onClick = onCancel) {
+                    Text("Cancel")
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                TextButton(
+                    onClick = onSave,
+                    enabled = noteContent.isNotBlank()
                 ) {
-                    Text("🕐", style = MaterialTheme.typography.titleMedium)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column {
-                        Text(
-                            "Time",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            noteTime.format(pickerTimeFormatter),
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
+                    Text("Save")
                 }
             }
+            
+            Spacer(modifier = Modifier.height(24.dp))
         }
-        
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        Text(
-            "Enter your 1-on-1 notes (one point per line)",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        
-        Spacer(modifier = Modifier.height(8.dp))
-        
-        OutlinedTextField(
-            value = noteContent,
-            onValueChange = onNoteContentChange,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(180.dp),
-            placeholder = { 
-                Text("- Discussion point 1\n- Discussion point 2\n- Action items...")
-            }
-        )
-        
-        Spacer(modifier = Modifier.height(24.dp))
-        
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
-        ) {
-            TextButton(onClick = onCancel) {
-                Text("Cancel")
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            TextButton(
-                onClick = onSave,
-                enabled = noteContent.isNotBlank()
-            ) {
-                Text("Save")
-            }
-        }
-        
-        Spacer(modifier = Modifier.height(24.dp))
     }
     
     // Date Picker Dialog
@@ -606,7 +666,10 @@ fun AddNoteSheet(
                 }
             }
         ) {
-            DatePicker(state = datePickerState)
+            DatePicker(
+                state = datePickerState,
+                showModeToggle = false  // Hide the pencil icon
+            )
         }
     }
     

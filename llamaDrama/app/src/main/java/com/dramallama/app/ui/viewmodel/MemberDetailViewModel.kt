@@ -39,16 +39,33 @@ class MemberDetailViewModel(
     private val _noteTime = MutableStateFlow(LocalTime.now())
     val noteTime: StateFlow<LocalTime> = _noteTime.asStateFlow()
     
+    // Sentiment tracking state
+    private val _noteMood = MutableStateFlow<Int?>(null)
+    val noteMood: StateFlow<Int?> = _noteMood.asStateFlow()
+    
+    private val _noteProductivity = MutableStateFlow<Int?>(null)
+    val noteProductivity: StateFlow<Int?> = _noteProductivity.asStateFlow()
+    
+    private val _noteFlightRisk = MutableStateFlow<Int?>(null)
+    val noteFlightRisk: StateFlow<Int?> = _noteFlightRisk.asStateFlow()
+    
     fun showAddNoteSheet() {
         // Reset to current date/time when opening
         _noteDate.value = LocalDate.now()
         _noteTime.value = LocalTime.now()
+        // Reset sentiment values
+        _noteMood.value = null
+        _noteProductivity.value = null
+        _noteFlightRisk.value = null
         _showAddNoteSheet.value = true
     }
     
     fun hideAddNoteSheet() {
         _showAddNoteSheet.value = false
         _noteContent.value = ""
+        _noteMood.value = null
+        _noteProductivity.value = null
+        _noteFlightRisk.value = null
     }
     
     fun updateNoteContent(content: String) {
@@ -63,12 +80,31 @@ class MemberDetailViewModel(
         _noteTime.value = time
     }
     
+    fun updateNoteMood(mood: Int?) {
+        _noteMood.value = mood
+    }
+    
+    fun updateNoteProductivity(productivity: Int?) {
+        _noteProductivity.value = productivity
+    }
+    
+    fun updateNoteFlightRisk(flightRisk: Int?) {
+        _noteFlightRisk.value = flightRisk
+    }
+    
     fun addMeetingNote() {
         val content = _noteContent.value.trim()
         if (content.isNotEmpty()) {
             val timestamp = LocalDateTime.of(_noteDate.value, _noteTime.value)
             viewModelScope.launch {
-                repository.addMeetingNote(memberId, content, timestamp)
+                repository.addMeetingNote(
+                    memberId = memberId,
+                    content = content,
+                    timestamp = timestamp,
+                    mood = _noteMood.value,
+                    productivity = _noteProductivity.value,
+                    flightRisk = _noteFlightRisk.value
+                )
                 hideAddNoteSheet()
             }
         }

@@ -47,24 +47,36 @@ class TeamRepository(private val database: AppDatabase) {
     suspend fun addMeetingNote(
         memberId: Long, 
         content: String,
-        timestamp: LocalDateTime = LocalDateTime.now()
+        timestamp: LocalDateTime = LocalDateTime.now(),
+        mood: Int? = null,
+        productivity: Int? = null,
+        flightRisk: Int? = null
     ): Long {
         val note = MeetingNote(
             memberId = memberId,
             timestampEpochSecond = timestamp.toEpochSecond(ZoneOffset.UTC),
-            content = content
+            content = content,
+            mood = mood,
+            productivity = productivity,
+            flightRisk = flightRisk
         )
         val noteId = meetingNoteDao.insert(note)
         
-        // Update member's last contact date and topic
+        // Only update member's last contact if this note is more recent
         val member = teamMemberDao.getMemberById(memberId)
         member?.let {
-            teamMemberDao.update(
-                it.copy(
-                    lastContactEpochDay = timestamp.toLocalDate().toEpochDay(),
-                    lastTopic = content.lines().firstOrNull()?.take(100) ?: "Meeting"
+            val noteDate = timestamp.toLocalDate().toEpochDay()
+            val currentLastContact = it.lastContactEpochDay
+            
+            // Update only if this note is newer than current last contact (or no last contact set)
+            if (currentLastContact == null || noteDate > currentLastContact) {
+                teamMemberDao.update(
+                    it.copy(
+                        lastContactEpochDay = noteDate,
+                        lastTopic = content.lines().firstOrNull()?.take(100) ?: "Meeting"
+                    )
                 )
-            )
+            }
         }
         
         return noteId
@@ -72,10 +84,46 @@ class TeamRepository(private val database: AppDatabase) {
     
     suspend fun updateNote(note: MeetingNote) {
         meetingNoteDao.update(note)
+        // Recalculate member's last contact after update
+        recalculateMemberLastContact(note.memberId)
     }
     
     suspend fun deleteNote(note: MeetingNote) {
+        val memberId = note.memberId
         meetingNoteDao.delete(note)
+        // Recalculate member's last contact after deletion
+        recalculateMemberLastContact(memberId)
+    }
+    
+    /**
+     * Recalculates a member's lastContactEpochDay and lastTopic based on their remaining notes.
+     * Called after a note is deleted or updated.
+     */
+    private suspend fun recalculateMemberLastContact(memberId: Long) {
+        val member = teamMemberDao.getMemberById(memberId) ?: return
+        val remainingNotes = meetingNoteDao.getNotesForMember(memberId)
+        
+        if (remainingNotes.isEmpty()) {
+            // No notes left - clear last contact info
+            teamMemberDao.update(
+                member.copy(
+                    lastContactEpochDay = null,
+                    lastTopic = null
+                )
+            )
+        } else {
+            // Find the most recent note (notes are already sorted DESC by timestamp)
+            val mostRecentNote = remainingNotes.first()
+            val mostRecentDate = mostRecentNote.timestampEpochSecond.toLocalDateTime().toLocalDate().toEpochDay()
+            val mostRecentTopic = mostRecentNote.content.lines().firstOrNull()?.take(100) ?: "Meeting"
+            
+            teamMemberDao.update(
+                member.copy(
+                    lastContactEpochDay = mostRecentDate,
+                    lastTopic = mostRecentTopic
+                )
+            )
+        }
     }
     
     // Export/Import
@@ -83,7 +131,7 @@ class TeamRepository(private val database: AppDatabase) {
         val members = teamMemberDao.getAllMembers()
         val notes = meetingNoteDao.getAllNotes()
         val exportData = ExportData(
-            version = 1,
+            version = 2,
             exportedAt = LocalDateTime.now().toString(),
             members = members,
             notes = notes
