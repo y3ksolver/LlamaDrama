@@ -70,6 +70,8 @@ import com.dramallama.app.ui.components.SentimentSlider
 import com.dramallama.app.ui.components.TrendChart
 import com.dramallama.app.ui.components.TrendDataPoint
 import com.dramallama.app.ui.viewmodel.MemberDetailViewModel
+import com.dramallama.app.ui.viewmodel.MemberDetailViewModel.CadenceData
+import com.dramallama.app.ui.viewmodel.MemberDetailViewModel.FrequencyTrend
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -106,6 +108,7 @@ fun MemberDetailScreen(
     val moodTrend by viewModel.moodTrend.collectAsState()
     val productivityTrend by viewModel.productivityTrend.collectAsState()
     val totalMeetings by viewModel.totalMeetings.collectAsState()
+    val cadenceData by viewModel.cadenceData.collectAsState()
     
     Scaffold(
         topBar = {
@@ -141,6 +144,14 @@ fun MemberDetailScreen(
                 item {
                     Spacer(modifier = Modifier.height(4.dp))
                     CompactMemberHeader(member = currentMember)
+                }
+                
+                // Meeting Cadence Section
+                item {
+                    MeetingCadenceCard(
+                        cadenceData = cadenceData,
+                        totalMeetings = totalMeetings
+                    )
                 }
                 
                 // Sentiment Trends Section (collapsible)
@@ -765,6 +776,129 @@ fun NoteSheet(
                 }
             }
         )
+    }
+}
+
+@Composable
+fun MeetingCadenceCard(
+    cadenceData: CadenceData,
+    totalMeetings: Int,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("📅", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        "Meeting Cadence",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            if (totalMeetings < 2) {
+                Text(
+                    text = "Need at least 2 meetings to calculate cadence",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                )
+            } else {
+                cadenceData.avgFrequencyDays?.let { avgFreq ->
+                    // Average frequency with edge case handling
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val displayText = when {
+                            avgFreq < 1.0 -> "Same day"
+                            avgFreq == 1.0 -> "Avg 1 day"
+                            else -> "Avg ${avgFreq.toInt()} days"
+                        }
+                        
+                        Text(
+                            text = displayText,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        
+                        // Cadence rating badge
+                        val cadenceLabel = if (cadenceData.isRegular) "Regular" else "Irregular"
+                        val cadenceColor = if (cadenceData.isRegular) 
+                            MaterialTheme.colorScheme.primary 
+                        else 
+                            MaterialTheme.colorScheme.error
+                        
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(cadenceColor.copy(alpha = 0.2f))
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = cadenceLabel,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = cadenceColor
+                            )
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    // Trend indicator
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        val trendIcon = when (cadenceData.trend) {
+                            FrequencyTrend.MORE_FREQUENT -> "↑"
+                            FrequencyTrend.LESS_FREQUENT -> "↓"
+                            FrequencyTrend.STABLE -> "→"
+                        }
+                        val trendText = when (cadenceData.trend) {
+                            FrequencyTrend.MORE_FREQUENT -> "More frequent"
+                            FrequencyTrend.LESS_FREQUENT -> "Less frequent"
+                            FrequencyTrend.STABLE -> "Stable"
+                        }
+                        val trendColor = when (cadenceData.trend) {
+                            FrequencyTrend.MORE_FREQUENT -> MaterialTheme.colorScheme.primary
+                            FrequencyTrend.LESS_FREQUENT -> MaterialTheme.colorScheme.error
+                            FrequencyTrend.STABLE -> MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                        
+                        Text(
+                            text = trendIcon,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = trendColor
+                        )
+                        Text(
+                            text = trendText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = trendColor.copy(alpha = 0.8f)
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

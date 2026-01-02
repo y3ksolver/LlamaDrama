@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.temporal.ChronoUnit
 
 class MemberDetailViewModel(
     private val repository: TeamRepository,
@@ -62,6 +63,71 @@ class MemberDetailViewModel(
     val totalMeetings: StateFlow<Int> = repository.getNotesForMemberFlow(memberId)
         .map { it.size }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    
+    // Meeting frequency and cadence data
+    data class CadenceData(
+        val avgFrequencyDays: Double?,  // null if < 2 meetings
+        val isRegular: Boolean,         // true if low variance
+        val trend: FrequencyTrend
+    )
+    
+    enum class FrequencyTrend {
+        MORE_FREQUENT,   // Getting better (shorter gaps)
+        LESS_FREQUENT,   // Getting worse (longer gaps)
+        STABLE           // No significant change
+    }
+    
+    val cadenceData: StateFlow<CadenceData> = repository.getNotesForMemberFlow(memberId)
+        .map { notes ->
+            calculateCadence(notes)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), CadenceData(null, false, FrequencyTrend.STABLE))
+    
+    private fun calculateCadence(notes: List<MeetingNote>): CadenceData {
+        if (notes.size < 2) {
+            return CadenceData(null, false, FrequencyTrend.STABLE)
+        }
+        
+        // Sort by timestamp (oldest first for gap calculation)
+        val sortedNotes = notes.sortedBy { it.timestampEpochSecond }
+        
+        // Calculate gaps between consecutive meetings (in days)
+        val gaps = sortedNotes.zipWithNext { a, b ->
+            val dateA = a.timestampEpochSecond.toLocalDateTime().toLocalDate()
+            val dateB = b.timestampEpochSecond.toLocalDateTime().toLocalDate()
+            ChronoUnit.DAYS.between(dateA, dateB).toDouble()
+        }
+        
+        if (gaps.isEmpty()) {
+            return CadenceData(null, false, FrequencyTrend.STABLE)
+        }
+        
+        // Calculate average frequency
+        val avgFrequency = gaps.average()
+        
+        // Calculate standard deviation for consistency
+        val variance = gaps.map { (it - avgFrequency) * (it - avgFrequency) }.average()
+        val stdDev = kotlin.math.sqrt(variance)
+        val isRegular = stdDev < 4.0  // Regular if std dev < 4 days
+        
+        // Determine trend (compare recent half vs older half)
+        val trend = if (gaps.size >= 4) {
+            val midpoint = gaps.size / 2
+            val olderHalf = gaps.take(midpoint).average()
+            val recentHalf = gaps.drop(midpoint).average()
+            val diff = olderHalf - recentHalf  // Positive = getting more frequent (shorter gaps)
+            
+            when {
+                diff > 3.0 -> FrequencyTrend.MORE_FREQUENT
+                diff < -3.0 -> FrequencyTrend.LESS_FREQUENT
+                else -> FrequencyTrend.STABLE
+            }
+        } else {
+            FrequencyTrend.STABLE
+        }
+        
+        return CadenceData(avgFrequency, isRegular, trend)
+    }
     
     private val _showNoteSheet = MutableStateFlow(false)
     val showNoteSheet: StateFlow<Boolean> = _showNoteSheet.asStateFlow()
